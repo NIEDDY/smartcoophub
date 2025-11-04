@@ -1,0 +1,345 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL_ONLINE")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  RCA_REGULATOR
+  COOP_ADMIN
+  SECRETARY
+  ACCOUNTANT
+  MEMBER
+  BUYER
+}
+
+enum CooperativeStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  CONTRIBUTION
+  DIVIDEND
+  LOAN
+  LOAN_REPAYMENT
+  WITHDRAWAL
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model User {
+  id                String          @id @default(uuid())
+  email             String          @unique
+  password          String
+  firstName         String
+  lastName          String
+  phone             String?
+  role              UserRole
+  isActive          Boolean         @default(true)
+  emailVerified     Boolean         @default(false)
+  avatar            String?
+  cooperativeId     String?
+  cooperative       Cooperative?    @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  otps              OTP[]
+  activities        ActivityLog[]
+  transactions      Transaction[]
+  requests          Request[]
+  orders            Order[]
+  reviews           Review[]
+  
+  @@index([email])
+  @@index([cooperativeId])
+}
+
+model OTP {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  type      String   // REGISTRATION, PASSWORD_RESET, EMAIL_VERIFICATION
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([code])
+}
+
+model Cooperative {
+  id                  String              @id @default(uuid())
+  name                String
+  registrationNumber  String              @unique
+  email               String              @unique
+  phone               String
+  address             String
+  district            String
+  sector              String
+  cell                String
+  village             String
+  type                String              // AGRICULTURAL, HANDCRAFT, etc.
+  description         String?
+  logo                String?
+  certificateUrl      String?
+  constitutionUrl     String?
+  status              CooperativeStatus   @default(PENDING)
+  foundedDate         DateTime?
+  totalMembers        Int                 @default(0)
+  verifiedBy          String?
+  verifiedAt          DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  
+  users               User[]
+  products            Product[]
+  transactions        Transaction[]
+  reports             Report[]
+  announcements       Announcement[]
+  requests            Request[]
+  activities          ActivityLog[]
+  
+  @@index([registrationNumber])
+  @@index([status])
+}
+
+model Product {
+  id              String        @id @default(uuid())
+  cooperativeId   String
+  cooperative     Cooperative   @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  name            String
+  description     String
+  category        String
+  price           Float
+  unit            String        // KG, PIECE, BAG, etc.
+  availableStock  Float
+  images          String[]      // Array of Cloudinary URLs
+  quality         String?
+  location        String?
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  orderItems      OrderItem[]
+  
+  @@index([cooperativeId])
+  @@index([category])
+}
+
+model Order {
+  id              String        @id @default(uuid())
+  orderNumber     String        @unique
+  buyerId         String
+  buyer           User          @relation(fields: [buyerId], references: [id])
+  totalAmount     Float
+  status          OrderStatus   @default(PENDING)
+  paymentMethod   String
+  paymentStatus   String        @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  transactionRef  String?       @unique
+  deliveryAddress String
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  items           OrderItem[]
+
+  @@index([buyerId])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id          String    @id @default(uuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  quantity    Float
+  price       Float
+  subtotal    Float
+  
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  cooperativeId   String
+  cooperative     Cooperative       @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?             @relation(fields: [userId], references: [id])
+  type            TransactionType
+  amount          Float
+  description     String
+  category        String?
+  reference       String?
+  blockchainHash  String?           // For Web3 transparency
+  approvedBy      String[]          // Array of user IDs who approved
+  requiresApproval Boolean          @default(false)
+  isApproved      Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  
+  @@index([cooperativeId])
+  @@index([userId])
+  @@index([type])
+}
+
+model MemberFinancial {
+  id              String      @id @default(uuid())
+  memberId        String      @unique
+  cooperativeId   String
+  shares          Float       @default(0)
+  savings         Float       @default(0)
+  dividends       Float       @default(0)
+  loans           Float       @default(0)
+  contributions   Float       @default(0)
+  updatedAt       DateTime    @updatedAt
+  
+  @@index([memberId])
+  @@index([cooperativeId])
+}
+
+model Request {
+  id              String        @id @default(uuid())
+  cooperativeId   String
+  cooperative     Cooperative   @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  requesterId     String
+  requester       User          @relation(fields: [requesterId], references: [id])
+  type            String        // LOAN, WITHDRAWAL, MEMBERSHIP, COMPLAINT, RESIGNATION
+  amount          Float?
+  description     String
+  status          RequestStatus @default(PENDING)
+  approvedBy      String[]      // Array of approver IDs
+  rejectedBy      String?
+  rejectionReason String?
+  processedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([cooperativeId])
+  @@index([requesterId])
+  @@index([status])
+}
+
+model Announcement {
+  id              String      @id @default(uuid())
+  cooperativeId   String?
+  cooperative     Cooperative? @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  title           String
+  content         String
+  type            String      // JOB, MEETING, TRAINING, TENDER, GENERAL
+  isPublic        Boolean     @default(false)
+  attachments     String[]
+  postedBy        String
+  expiresAt       DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  applications    JobApplication[]
+  
+  @@index([cooperativeId])
+  @@index([type])
+}
+
+model JobApplication {
+  id              String        @id @default(uuid())
+  announcementId  String
+  announcement    Announcement  @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  applicantName   String
+  applicantEmail  String
+  applicantPhone  String
+  resume          String?       // Cloudinary URL
+  coverLetter     String?
+  status          String        @default("PENDING") // PENDING, REVIEWED, ACCEPTED, REJECTED
+  createdAt       DateTime      @default(now())
+  
+  @@index([announcementId])
+}
+
+model Report {
+  id              String      @id @default(uuid())
+  cooperativeId   String
+  cooperative     Cooperative @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  title           String
+  type            String      // MONTHLY, ANNUAL, FINANCIAL, PERFORMANCE
+  period          String      // e.g., "2024-01", "2024"
+  content         Json
+  fileUrl         String?     // PDF report URL
+  generatedBy     String
+  createdAt       DateTime    @default(now())
+  
+  @@index([cooperativeId])
+  @@index([type])
+  @@index([period])
+}
+
+model Review {
+  id              String      @id @default(uuid())
+  buyerId         String
+  buyer           User        @relation(fields: [buyerId], references: [id])
+  cooperativeId   String
+  orderId         String      @unique
+  rating          Int         // 1-5
+  comment         String?
+  verified        Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  
+  @@index([cooperativeId])
+  @@index([buyerId])
+}
+
+model ActivityLog {
+  id              String      @id @default(uuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cooperativeId   String?
+  cooperative     Cooperative? @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  action          String
+  entity          String      // USER, COOPERATIVE, TRANSACTION, etc.
+  entityId        String?
+  details         Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime    @default(now())
+  
+  @@index([userId])
+  @@index([cooperativeId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Invitation {
+  id              String      @id @default(uuid())
+  email           String
+  cooperativeId   String
+  role            UserRole
+  token           String      @unique
+  expiresAt       DateTime
+  usedAt          DateTime?
+  invitedBy       String
+  createdAt       DateTime    @default(now())
+  
+  @@index([email])
+  @@index([token])
+  @@index([cooperativeId])
+}
